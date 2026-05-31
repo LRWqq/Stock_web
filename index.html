@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票成交記錄行動看板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <style>
+        /* 隱形捲軸，讓介面像 App 一樣乾淨 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen p-3 text-slate-800 antialiased selection:bg-blue-500 selection:text-white">
+
+    <div class="max-w-md mx-auto">
+        <header class="text-center my-5 space-y-1">
+            <h1 class="text-2xl font-black tracking-tight text-slate-900 flex items-center justify-center gap-2">
+                📊 股票成交行動看板
+            </h1>
+            <p id="statusLabel" class="text-xs text-slate-400 font-medium font-mono">正在連線雲端抽屜載入數據...</p>
+        </header>
+        
+        <div class="sticky top-2 z-50 mb-4 shadow-sm">
+            <input type="text" id="searchInput" placeholder="快速篩選股號 / 股票名稱..." 
+                   class="w-full px-4 py-3 bg-white/90 backdrop-blur-md border border-slate-200 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all placeholder:text-slate-400">
+        </div>
+
+        <div id="cardsContainer" class="space-y-4 pb-10"></div>
+    </div>
+
+    <script>
+        // 🌟 【超級重要】：請把下面這串網址，改成你 Python 執行上傳成功後，吐給你的那串 Gist 的 raw_url 網址！
+        const DATA_URL = "data.json"; 
+
+        let allTrades = [];
+        const activeCharts = {}; // 存放正在顯示的圖表實例，避免重複渲染
+
+        // ── 1. 從雲端 Gist 抽屜讀取最新資料 ──
+        async function loadData() {
+            try {
+                const res = await fetch(DATA_URL);
+                if (!res.ok) throw new Error("網路請求失敗");
+                allTrades = await res.json();
+                renderCards();
+                
+                // 啟動監聽器：當滑動網頁時，動態載入進入螢幕的即時 API（Lazy Loading）
+                window.addEventListener('scroll', handleLazyLoad);
+                window.addEventListener('resize', handleLazyLoad);
+            } catch (err) {
+                document.getElementById('statusLabel').innerText = "❌ 讀取雲端資料失敗，請確認網址是否正確。";
+                console.error(err);
+            }
+        }
+
+        // ── 2. 在手機內部即時生成股票卡片結構 ──
+        function renderCards(filterKeyword = "") {
+            const container = document.getElementById('cardsContainer');
+            container.innerHTML = ""; 
+
+            if (allTrades.length === 0) return;
+
+            // 分組資料 (groupby)
+            const groups = {};
+            allTrades.forEach(row => {
+                const id = row["股號"];
+                if (!groups[id]) groups[id] = [];
+                groups[id].push(row);
+            });
+
+            let stockCount = 0;
+            let totalRows = 0;
+
+            for (const stockId in groups) {
+                const group = groups[stockId];
+                const stockName = group[0]["股票名稱"] || "個股";
+
+                // 即時關鍵字過濾
+                if (filterKeyword && !stockId.includes(filterKeyword) && !stockName.includes(filterKeyword)) {
+                    continue;
+                }
+
+                stockCount++;
+                totalRows += group.length;
+
+                const buyCount = group.filter(r => String(r["類別"]).includes("買")).length;
+                const sellCount = group.filter(r => String(r["類別"]).includes("賣")).length;
+                const savedNote = localStorage.getItem(`note_${stockId}`) || "";
+
+                // 建立卡片節點
+                const card = document.createElement('div');
+                card.id = `card_box_${stockId}`;
+                card.dataset.stockId = stockId;
+                card.dataset.rendered = "false"; // 標記此圖表尚未渲染（等滾動到才渲染）
+                card.className = "bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden p-4 space-y-3 transition-all duration-300";
+
+                let html = `
+                    <div class="flex justify-between items-center border-b border-slate-100 pb-2.5">
+                        <div class="flex items-baseline gap-1.5">
+                            <span class="font-extrabold text-slate-900 text-lg tracking-tight">${stockId}</span>
+                            <span class="text-sm font-bold text-slate-500">${stockName}</span>
+                        </div>
+                        <span class="text-[11px] font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono">買 ${buyCount} / 賣 ${sellCount} (共 ${group.length} 筆)</span>
+                    </div>
+                    
+                    <div class="space-y-1 max-h-32 overflow-y-auto no-scrollbar">
+                `;
+
+                const recent = group.slice(-3).reverse(); 
+                recent.forEach(row => {
+                    const isBuy = String(row["類別"]).includes("買");
+                    const badgeClass = isBuy ? "bg-blue-50/70 text-blue-700 border-blue-100" : "bg-rose-50/70 text-rose-700 border-rose-100";
+                    html += `
+                        <div class="${badgeClass} border text-[11px] px-2.5 py-1.5 rounded-lg flex justify-between items-center font-mono font-medium">
+                            <span>📅 ${row["日期"]}</span>
+                            <span class="font-bold">${row["類別"]}</span>
+                            <span>${row["股數"]} 股</span>
+                            <span class="font-bold">$${parseFloat(row["單價"]).toFixed(1)}</span>
+                        </div>
+                    `;
+                });
+
+                html += `
+                    </div>
+                    
+                    <div id="chart_${stockId}" class="bg-slate-50/50 rounded-xl border border-slate-100 min-h-[140px] flex items-center justify-center text-xs text-slate-300 font-medium">
+                        📊 向上滑動載入趨勢圖...
+                    </div>
+                    
+                    <div class="border-t border-slate-100 pt-3 space-y-1.5">
+                        <label class="block text-[11px] font-bold text-slate-400 tracking-wider">📝 我的基本面與估值筆記：</label>
+                        <div class="flex gap-2">
+                            <textarea id="textarea_${stockId}" placeholder="白天在外操作備忘：例如合理本益比、預計承接價位..." 
+                                class="flex-1 text-xs p-2.5 border border-slate-200 rounded-xl bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none h-12 no-scrollbar font-medium text-slate-700">${savedNote}</textarea>
+                            <button onclick="saveNote('${stockId}')" 
+                                class="bg-slate-900 hover:bg-slate-800 text-white text-xs px-3.5 font-bold rounded-xl transition shadow-sm active:scale-95 flex items-center">儲存</button>
+                        </div>
+                    </div>
+                `;
+
+                card.innerHTML = html;
+                container.appendChild(card);
+            }
+
+            document.getElementById('statusLabel').innerText = `Sync: 共 ${stockCount} 支個股，${totalRows} 筆歷史成交`;
+            // 卡片生完了，立刻檢查一次哪些卡片目前在螢幕內
+            handleLazyLoad();
+        }
+
+        // ── 3. 🎯 防禦型懶載入（Lazy Load）：滑動到螢幕內才開始畫圖 ──
+        function handleLazyLoad() {
+            const cards = document.querySelectorAll('[id^="card_box_"]');
+            cards.forEach(card => {
+                if (card.dataset.rendered === "true") return; // 畫過的跳過
+
+                const rect = card.getBoundingClientRect();
+                // 判斷卡片是否進入手機螢幕的可視範圍
+                if (rect.top < window.innerHeight && rect.bottom >= 0) {
+                    card.dataset.rendered = "true"; // 標記為已動工
+                    const stockId = card.dataset.stockId;
+                    
+                    // 找出這檔股票的資料群組
+                    const group = allTrades.filter(r => r["股號"] === stockId);
+                    if (group.length >= 3) {
+                        // 清空「載入中」字樣，開始畫圖
+                        document.getElementById(`chart_${stockId}`).innerHTML = "";
+                        renderChart(stockId, group);
+                    } else {
+                        document.getElementById(`chart_${stockId}`).innerHTML = "<div class='p-3 text-slate-400'>📊 記錄少於 3 筆，不顯示圖表</div>";
+                    }
+                }
+            });
+        }
+
+        // ── 4. 網頁端買賣雙線獨立高效繪圖引擎 ──
+        function renderChart(stockId, group) {
+            const sorted = [...group].sort((a,b) => a["日期"].localeCompare(b["日期"]));
+            const buyData = [];
+            const sellData = [];
+
+            sorted.forEach(row => {
+                const price = parseFloat(row["單價"]);
+                if (String(row["類別"]).includes("買")) {
+                    buyData.push({ x: row["日期"], y: price });
+                } else {
+                    sellData.push({ x: row["日期"], y: price });
+                }
+            });
+
+            const options = {
+                chart: { type: 'line', height: 140, toolbar: { show: false }, animations: { enabled: true } },
+                colors: ['#3b82f6', '#ef4444'], // 買藍、賣紅
+                series: [
+                    { name: '買入', data: buyData },
+                    { name: '賣出', data: sellData }
+                ],
+                stroke: { width: 2, curve: 'straight' },
+                markers: { size: 3, strokeWidth: 1 },
+                xaxis: { labels: { show: false }, axisBorder: { show: false }, axisTicks: { show: false } },
+                yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '9px', fontFamily: 'monospace' } } },
+                grid: { borderColor: '#f8fafc' },
+                legend: { show: false },
+                tooltip: { theme: 'light', x: { show: true } }
+            };
+
+            const chart = new ApexCharts(document.querySelector(`#chart_${stockId}`), options);
+            chart.render();
+            activeCharts[stockId] = chart;
+        }
+
+        // ── 5. 儲存註記到手機 LocalStorage (舊筆記自動覆蓋不留垃圾) ──
+        function saveNote(stockId) {
+            const textarea = document.getElementById(`textarea_${stockId}`);
+            const noteText = textarea.value.trim();
+            
+            // 🔒 100% 寫入你這台手機的專屬硬體空間，舊資料精準抹除覆蓋
+            localStorage.setItem(`note_${stockId}`, noteText);
+            alert(`✨ [${stockId}] 估值備忘註記儲存成功！`);
+        }
+
+        // ── 6. 搜尋框鍵盤輸入即時篩選 ──
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            renderCards(e.target.value.trim());
+        });
+
+        // 初始化點火
+        loadData();
+    </script>
+</body>
+</html>
