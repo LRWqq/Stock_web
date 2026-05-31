@@ -40,7 +40,7 @@
         // ── 1. 從雲端 Gist 抽屜讀取最新資料 ──
         async function loadData() {
             try {
-                const base_url = await fetch(DATA_URL);
+                const base_url = DATA_URL;
                 
                 // 自動生成一串動態亂碼（例如 ?t=1717143600）
                 const cacheBuster = "?t=" + new Date().getTime(); 
