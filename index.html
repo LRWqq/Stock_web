@@ -40,7 +40,14 @@
         // ── 1. 從雲端 Gist 抽屜讀取最新資料 ──
         async function loadData() {
             try {
-                const res = await fetch(DATA_URL);
+                const base_url = await fetch(DATA_URL);
+                
+                // 自動生成一串動態亂碼（例如 ?t=1717143600）
+                const cacheBuster = "?t=" + new Date().getTime(); 
+                
+                // 最終連線網址每次打開都不同，徹底逼瀏覽器每次都抓最新檔案！
+                const res = await fetch(base_url + cacheBuster);
+                
                 if (!res.ok) throw new Error("網路請求失敗");
                 allTrades = await res.json();
                 renderCards();
