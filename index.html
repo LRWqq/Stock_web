@@ -38,25 +38,42 @@
         const activeCharts = {}; // 存放正在顯示的圖表實例，避免重複渲染
 
         // ── 1. 從雲端 Gist 抽屜讀取最新資料 ──
+        // ── 1. 從雲端 Gist 抽屜讀取最新資料 ──
         async function loadData() {
             try {
-                const base_url = DATA_URL;
+                // 🌟 1. 【最強解法】：直接打 GitHub Gist 官方 API，這個網址天生自帶允許跨網域(CORS)！
+                // 填入你之前的 Gist ID（那一長串英數亂碼）
+                // 格式如：https://api.github.com/gists/你的一長串GistID
+                const GIST_API_URL = "https://api.github.com/gists/e16a4bc73f32cd2760003699d308d2ae"; 
                 
-                // 自動生成一串動態亂碼（例如 ?t=1717143600）
+                // 加上時間戳記，確保 GitHub 每次都吐最新狀態
                 const cacheBuster = "?t=" + new Date().getTime(); 
                 
-                // 最終連線網址每次打開都不同，徹底逼瀏覽器每次都抓最新檔案！
-                const res = await fetch(base_url + cacheBuster);
+                document.getElementById('statusLabel').innerText = "正在向 GitHub 索取最新資料...";
                 
-                if (!res.ok) throw new Error("網路請求失敗");
-                allTrades = await res.json();
+                const res = await fetch(GIST_API_URL + cacheBuster);
+                if (!res.ok) throw new Error("GitHub 回應失敗，代碼: " + res.status);
+                
+                const gistData = await res.json();
+                
+                // 🌟 2. 解析 Gist 官方回傳的特殊 JSON 結構
+                // 它是把 data.json 的內容包在 files -> data.json -> content 裡面
+                const rawContent = gistData.files["data.json"].content;
+                
+                // 將文字轉回 Pandas 吐出來的陣列結構
+                allTrades = JSON.parse(rawContent);
+                
+                // 成功抓到，開始畫卡片！
                 renderCards();
                 
-                // 啟動監聽器：當滑動網頁時，動態載入進入螢幕的即時 API（Lazy Loading）
+                // 啟動監聽器（Lazy Loading）
                 window.addEventListener('scroll', handleLazyLoad);
                 window.addEventListener('resize', handleLazyLoad);
+                
             } catch (err) {
-                document.getElementById('statusLabel').innerText = "❌ 讀取雲端資料失敗，請確認網址是否正確。";
+                // 🌟 3. 【照妖鏡】：如果失敗，直接把「真正的錯誤訊息」噴在網頁標題下方！
+                document.getElementById('statusLabel').innerText = "❌ 錯誤原因: " + err.message;
+                document.getElementById('statusLabel').className = "text-xs text-rose-500 font-bold bg-rose-50 p-2 rounded-lg mt-2";
                 console.error(err);
             }
         }
