@@ -7,17 +7,16 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
-        /* 隱形捲軸，讓介面像 App 一樣乾淨 */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-3 text-slate-800 antialiased selection:bg-blue-500 selection:text-white">
+<body class="bg-slate-100 min-h-screen p-3 text-slate-800 antialiased font-sans">
 
     <div class="max-w-md mx-auto">
         <header class="text-center my-5 space-y-1">
             <h1 class="text-2xl font-black tracking-tight text-slate-900 flex items-center justify-center gap-2">
-                📊 股票成交行動看板
+                static 📊 股票成交行動看板
             </h1>
             <p id="statusLabel" class="text-xs text-slate-400 font-medium font-mono">正在連線雲端抽屜載入數據...</p>
         </header>
@@ -31,39 +30,26 @@
     </div>
 
     <script>
-        // 🌟 【超級重要】：請把下面這串網址，改成你 Python 執行上傳成功後，吐給你的那串 Gist 的 raw_url 網址！
-        const DATA_URL = "https://cdn.jsdelivr.net/gh/LRWqq/e16a4bc73f32cd2760003699d308d2ae@main/data.json"; 
+        // 🌟 【超級重要】：請把下面這串網址，改成你的 Gist 官方 API 網址！
+        // 格式如: https://api.github.com/gists/你的一長串GistID
+        const GIST_API_URL = "https://api.github.com/gists/e16a4bc73f32cd2760003699d308d2ae"; 
 
         let allTrades = [];
-        const activeCharts = {}; // 存放正在顯示的圖表實例，避免重複渲染
+        const activeCharts = {}; // 存放 ApexCharts 實例
 
-        // ── 1. 從雲端 Gist 抽屜讀取最新資料 ──
-        // ── 1. 從雲端 Gist 抽屜讀取最新資料 ──
+        // ── 1. 從雲端 Gist 讀取最新資料 ──
         async function loadData() {
             try {
-                // 🌟 1. 【最強解法】：直接打 GitHub Gist 官方 API，這個網址天生自帶允許跨網域(CORS)！
-                // 填入你之前的 Gist ID（那一長串英數亂碼）
-                // 格式如：https://api.github.com/gists/你的一長串GistID
-                const GIST_API_URL = "https://api.github.com/gists/e16a4bc73f32cd2760003699d308d2ae"; 
-                
-                // 加上時間戳記，確保 GitHub 每次都吐最新狀態
                 const cacheBuster = "?t=" + new Date().getTime(); 
-                
                 document.getElementById('statusLabel').innerText = "正在向 GitHub 索取最新資料...";
                 
                 const res = await fetch(GIST_API_URL + cacheBuster);
                 if (!res.ok) throw new Error("GitHub 回應失敗，代碼: " + res.status);
                 
                 const gistData = await res.json();
-                
-                // 🌟 2. 解析 Gist 官方回傳的特殊 JSON 結構
-                // 它是把 data.json 的內容包在 files -> data.json -> content 裡面
                 const rawContent = gistData.files["data.json"].content;
-                
-                // 將文字轉回 Pandas 吐出來的陣列結構
                 allTrades = JSON.parse(rawContent);
                 
-                // 成功抓到，開始畫卡片！
                 renderCards();
                 
                 // 啟動監聽器（Lazy Loading）
@@ -71,7 +57,6 @@
                 window.addEventListener('resize', handleLazyLoad);
                 
             } catch (err) {
-                // 🌟 3. 【照妖鏡】：如果失敗，直接把「真正的錯誤訊息」噴在網頁標題下方！
                 document.getElementById('statusLabel').innerText = "❌ 錯誤原因: " + err.message;
                 document.getElementById('statusLabel').className = "text-xs text-rose-500 font-bold bg-rose-50 p-2 rounded-lg mt-2";
                 console.error(err);
@@ -85,7 +70,7 @@
 
             if (allTrades.length === 0) return;
 
-            // 分組資料 (groupby)
+            // 分組資料
             const groups = {};
             allTrades.forEach(row => {
                 const id = row["股號"];
@@ -100,7 +85,7 @@
                 const group = groups[stockId];
                 const stockName = group[0]["股票名稱"] || "個股";
 
-                // 即時關鍵字過濾
+                // 關鍵字過濾
                 if (filterKeyword && !stockId.includes(filterKeyword) && !stockName.includes(filterKeyword)) {
                     continue;
                 }
@@ -111,12 +96,13 @@
                 const buyCount = group.filter(r => String(r["類別"]).includes("買")).length;
                 const sellCount = group.filter(r => String(r["類別"]).includes("賣")).length;
                 const savedNote = localStorage.getItem(`note_${stockId}`) || "";
+                const hasEnoughData = group.length >= 3;
 
                 // 建立卡片節點
                 const card = document.createElement('div');
                 card.id = `card_box_${stockId}`;
                 card.dataset.stockId = stockId;
-                card.dataset.rendered = "false"; // 標記此圖表尚未渲染（等滾動到才渲染）
+                card.dataset.rendered = "false"; 
                 card.className = "bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden p-4 space-y-3 transition-all duration-300";
 
                 let html = `
@@ -125,7 +111,15 @@
                             <span class="font-extrabold text-slate-900 text-lg tracking-tight">${stockId}</span>
                             <span class="text-sm font-bold text-slate-500">${stockName}</span>
                         </div>
-                        <span class="text-[11px] font-semibold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono">買 ${buyCount} / 賣 ${sellCount} (共 ${group.length} 筆)</span>
+                        <div class="flex items-center gap-2">
+                            ${hasEnoughData ? `
+                                <button onclick="toggleChartMode('${stockId}')" id="btn_${stockId}" 
+                                    class="text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-100 px-2 py-1 rounded-lg hover:bg-blue-100 active:scale-95 transition-all">
+                                    ⇄ 專業 K 線
+                                </button>
+                            ` : ''}
+                            <span class="text-[10px] font-semibold bg-slate-100 text-slate-400 px-2 py-1 rounded-md font-mono">共 ${group.length} 筆</span>
+                        </div>
                     </div>
                     
                     <div class="space-y-1 max-h-32 overflow-y-auto no-scrollbar">
@@ -134,7 +128,7 @@
                 const recent = group.slice(-3).reverse(); 
                 recent.forEach(row => {
                     const isBuy = String(row["類別"]).includes("買");
-                    const badgeClass = isBuy ? "bg-blue-50/70 text-blue-700 border-blue-100" : "bg-rose-50/70 text-rose-700 border-rose-100";
+                    const badgeClass = isBuy ? "bg-blue-50/60 text-blue-700 border-blue-100" : "bg-rose-50/70 text-rose-700 border-rose-100";
                     html += `
                         <div class="${badgeClass} border text-[11px] px-2.5 py-1.5 rounded-lg flex justify-between items-center font-mono font-medium">
                             <span>📅 ${row["日期"]}</span>
@@ -148,8 +142,12 @@
                 html += `
                     </div>
                     
-                    <div id="chart_${stockId}" class="bg-slate-50/50 rounded-xl border border-slate-100 min-h-[140px] flex items-center justify-center text-xs text-slate-300 font-medium">
-                        📊 向上滑動載入趨勢圖...
+                    <div class="relative w-full min-h-[160px] bg-slate-50 rounded-xl border border-slate-100 overflow-hidden">
+                        <div id="my_chart_wrapper_${stockId}" class="w-full h-full">
+                            <div id="chart_${stockId}" class="w-full"></div>
+                        </div>
+                        <div id="tv_chart_wrapper_${stockId}" class="absolute inset-0 w-full h-full hidden flex items-center justify-center">
+                            </div>
                     </div>
                     
                     <div class="border-t border-slate-100 pt-3 space-y-1.5">
@@ -168,36 +166,33 @@
             }
 
             document.getElementById('statusLabel').innerText = `Sync: 共 ${stockCount} 支個股，${totalRows} 筆歷史成交`;
-            // 卡片生完了，立刻檢查一次哪些卡片目前在螢幕內
             handleLazyLoad();
         }
 
-        // ── 3. 🎯 防禦型懶載入（Lazy Load）：滑動到螢幕內才開始畫圖 ──
+        // ── 3. 🎯 防禦型懶載入（Lazy Load）：滑動到螢幕內才開始初始化圖表 ──
         function handleLazyLoad() {
             const cards = document.querySelectorAll('[id^="card_box_"]');
             cards.forEach(card => {
-                if (card.dataset.rendered === "true") return; // 畫過的跳過
+                if (card.dataset.rendered === "true") return; 
 
                 const rect = card.getBoundingClientRect();
-                // 判斷卡片是否進入手機螢幕的可視範圍
                 if (rect.top < window.innerHeight && rect.bottom >= 0) {
-                    card.dataset.rendered = "true"; // 標記為已動工
+                    card.dataset.rendered = "true"; 
                     const stockId = card.dataset.stockId;
-                    
-                    // 找出這檔股票的資料群組
                     const group = allTrades.filter(r => r["股號"] === stockId);
+                    
                     if (group.length >= 3) {
-                        // 清空「載入中」字樣，開始畫圖
-                        document.getElementById(`chart_${stockId}`).innerHTML = "";
+                        // 🟢 狀況 A：大於等於 3 筆，預設渲染並顯示「自有的買賣歷史線」
                         renderChart(stockId, group);
                     } else {
-                        document.getElementById(`chart_${stockId}`).innerHTML = "<div class='p-3 text-slate-400'>📊 記錄少於 3 筆，不顯示圖表</div>";
+                        // 🟡 狀況 B：少於 3 筆，不用留白！直接強制開啟「TradingView 專業K線模式」
+                        forceTradingViewMode(stockId);
                     }
                 }
             });
         }
 
-        // ── 4. 網頁端買賣雙線獨立高效繪圖引擎 ──
+        // ── 4. 網頁端買賣雙線高效繪圖引擎（鎖死不縮放） ──
         function renderChart(stockId, group) {
             const sorted = [...group].sort((a,b) => a["日期"].localeCompare(b["日期"]));
             const buyData = [];
@@ -213,19 +208,28 @@
             });
 
             const options = {
-                chart: { type: 'line', height: 140, toolbar: { show: false }, animations: { enabled: true } },
-                colors: ['#3b82f6', '#ef4444'], // 買藍、賣紅
+                chart: { 
+                    type: 'line', 
+                    height: 150, 
+                    toolbar: { show: false }, 
+                    animations: { enabled: false }, // 關閉動畫，滑動時更順暢
+                    zoom: { enabled: false },
+                    scroller: { enabled: false },
+                    sparkline: { enabled: false }
+                },
+                touchAction: 'pan-y', 
+                colors: ['#3b82f6', '#ef4444'],
                 series: [
                     { name: '買入', data: buyData },
                     { name: '賣出', data: sellData }
                 ],
                 stroke: { width: 2, curve: 'straight' },
-                markers: { size: 3, strokeWidth: 1 },
+                markers: { size: 4, strokeWidth: 1 },
                 xaxis: { labels: { show: false }, axisBorder: { show: false }, axisTicks: { show: false } },
                 yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '9px', fontFamily: 'monospace' } } },
                 grid: { borderColor: '#f8fafc' },
                 legend: { show: false },
-                tooltip: { theme: 'light', x: { show: true } }
+                tooltip: { theme: 'light', x: { show: true }, shared: true, intersect: false }
             };
 
             const chart = new ApexCharts(document.querySelector(`#chart_${stockId}`), options);
@@ -233,22 +237,70 @@
             activeCharts[stockId] = chart;
         }
 
-        // ── 5. 儲存註記到手機 LocalStorage (舊筆記自動覆蓋不留垃圾) ──
+        // ── 5. 🚀 核心黑科技：雙模式切換功能 ──
+        function toggleChartMode(stockId) {
+            const myWrapper = document.getElementById(`my_chart_wrapper_${stockId}`);
+            const tvWrapper = document.getElementById(`tv_chart_wrapper_${stockId}`);
+            const btn = document.getElementById(`btn_${stockId}`);
+
+            if (tvWrapper.classList.contains('hidden')) {
+                // 🔄 切換到「TradingView 專業K線」
+                myWrapper.classList.add('hidden');
+                tvWrapper.classList.remove('hidden');
+                btn.innerText = "⇄ 買賣紀錄";
+                btn.className = "text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-100 px-2 py-1 rounded-lg hover:bg-amber-100 active:scale-95 transition-all";
+                
+                // 如果是第一次切換，才動態載入 iframe，省電省流量
+                if (tvWrapper.innerHTML.trim() === "") {
+                    injectTradingViewIframe(stockId, tvWrapper);
+                }
+            } else {
+                // 🔄 切回「自己的買賣紀錄線」
+                tvWrapper.classList.add('hidden');
+                myWrapper.classList.remove('hidden');
+                btn.innerText = "⇄ 專業 K 線";
+                btn.className = "text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-100 px-2 py-1 rounded-lg hover:bg-blue-100 active:scale-95 transition-all";
+            }
+        }
+
+        // ── 6. 強制少於 3 筆的個股直接進入 TradingView 模式 ──
+        function forceTradingViewMode(stockId) {
+            const myWrapper = document.getElementById(`my_chart_wrapper_${stockId}`);
+            const tvWrapper = document.getElementById(`tv_chart_wrapper_${stockId}`);
+            myWrapper.classList.add('hidden');
+            tvWrapper.classList.remove('hidden');
+            injectTradingViewIframe(stockId, tvWrapper);
+        }
+
+        // ── 7. 注入 TradingView 官方免費的高級行動端 K 線圖組件 ──
+        function injectTradingViewIframe(stockId, containerElement) {
+            
+            // 💡 移除原本生硬的 TWSE: 前綴
+            // 改用 TradingView 的官方標準 embed 網址與最安全的參數組合
+            const tvUrl = `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart&symbol=${stockId}&interval=D&theme=light&style=1&timezone=Asia%2FTaipei&studies=%5B%5D&showpopupbutton=false&showheaderwidget=false&backcolor=f8fafc&withdateranges=false`;
+            
+            // 如果上述無前綴在某些極端狀況下不靈，以下是台灣上市櫃的自動分流保險：
+            // 台灣上市通常是 4 碼，而上櫃也是 4 碼，但我們可以利用 TradingView 萬能搜尋格式。
+            // 這裡直接將網址寫入 iframe，並利用 class 確保圓角漂亮
+            containerElement.innerHTML = `
+                <iframe src="${tvUrl}" 
+                        width="100%" height="160" frameborder="0" allowtransparency="true" scrolling="no" class="rounded-xl"></iframe>
+            `;
+        }
+
+        // ── 8. 儲存註記到手機 LocalStorage ──
         function saveNote(stockId) {
             const textarea = document.getElementById(`textarea_${stockId}`);
             const noteText = textarea.value.trim();
-            
-            // 🔒 100% 寫入你這台手機的專屬硬體空間，舊資料精準抹除覆蓋
             localStorage.setItem(`note_${stockId}`, noteText);
             alert(`✨ [${stockId}] 估值備忘註記儲存成功！`);
         }
 
-        // ── 6. 搜尋框鍵盤輸入即時篩選 ──
+        // ── 9. 搜尋框篩選 ──
         document.getElementById('searchInput').addEventListener('input', (e) => {
             renderCards(e.target.value.trim());
         });
 
-        // 初始化點火
         loadData();
     </script>
 </body>
